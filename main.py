@@ -10,7 +10,8 @@ def send_telegram_msg(message):
     data = {'chat_id': CHAT_ID, 'text': message}
     requests.post(url, data=data)
 
-def check_reservation():
+def check_month_reservation(target_ym, dept_id, dept_name):
+    """특정 연월(target_ym)과 탐방원(dept_id)의 토요일 잔여 객실을 조회하는 함수"""
     target_url = "https://res.knps.or.kr/eco/searchEcoMonthReservation.do"
     
     headers = {
@@ -19,22 +20,20 @@ def check_reservation():
         'Referer': 'https://res.knps.or.kr/eco/searchEcoMonthReservation.do'
     }
     
-    # 변산반도 생태탐방원 (생활관) 조회 파라미터
-    # ※ 조회하고 싶은 연월(searchYearMonth)이나 지점(deptId)이 변경되면 이 부분을 수정하세요.
     payload = {
-        'searchYearMonth': '202610',  # 예: 2026년 10월
-        'deptId': 'B183001',          # 변산반도 생태탐방원
-        'ctgType': '01'               # 생활관
+        'searchYearMonth': target_ym,  # YYYYMM 형식 (예: 202609, 202610)
+        'deptId': dept_id,            # B183001: 변산반도
+        'ctgType': '01'               # 01: 생활관
     }
+    
+    saturday_results = []
     
     try:
         response = requests.post(target_url, headers=headers, data=payload)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # class 이름에 'calendar-cell'과 'sat'이 모두 들어간 토요일 셀 탐색
+        # 토요일 셀만 추출
         saturday_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c and 'sat' in c)
-        
-        available_saturdays = []
         
         for cell in saturday_cells:
             use_date = cell.get('data-usedt', '날짜 미상')
@@ -43,29 +42,46 @@ def check_reservation():
             if em_tag:
                 try:
                     count = int(em_tag.text.strip())
-                    print(f"조회된 토요일 [{use_date}]: {count}개")
+                    print(f"[{dept_name}] {use_date} (토): {count}개")
                     
+                    # 실 운영시에는 count >= 1 로 동작합니다.
                     if count >= 0:
-                        available_saturdays.append(f"- {use_date}: {count}개 잔여")
+                        saturday_results.append(f"- {use_date}: {count}개 잔여")
                 except ValueError:
                     continue
-
-        # 잔여 객실이 1개 이상 존재하면 텔레그램 알림 전송
-        if available_saturdays:
-            msg_details = "\n".join(available_saturdays)
-            message = (
-                f"[변산반도 생태탐방원 토요일 알림]\n"
-                f"🎉 예약 가능한 토요일 객실이 발견되었습니다!\n\n"
-                f"{msg_details}\n\n"
-                f"👉 바로 예약하기: {target_url}"
-            )
-            send_telegram_msg(message)
-            print("텔레그램 알림 발송 완료!")
-        else:
-            print("현재 예약 가능한 토요일 객실이 없습니다.")
-            
+                    
     except Exception as e:
-        print(f"오류 발생: {e}")
+        print(f"[{target_ym}] 조회 중 오류 발생: {e}")
+        
+    return saturday_results
+
+def main():
+    dept_id = "B183001"
+    dept_name = "변산반도 생태탐방원(생활관)"
+    
+    # 🔍 조회하고 싶은 연월 리스트 설정 (9월, 10월)
+    target_months = ['202609', '202610']
+    
+    all_available = []
+    
+    for ym in target_months:
+        results = check_month_reservation(ym, dept_id, dept_name)
+        if results:
+            all_available.extend(results)
+            
+    # 잔여 객실이 발견되면 텔레그램 발송
+    if all_available:
+        msg_details = "\n".join(all_available)
+        message = (
+            f"🏞️ [{dept_name}]\n"
+            f"🎉 토요일 예약 가능 객실이 있습니다!\n\n"
+            f"{msg_details}\n\n"
+            f"👉 지금 예약하기:\nhttps://res.knps.or.kr/eco/searchEcoMonthReservation.do"
+        )
+        send_telegram_msg(message)
+        print("텔레그램 알림 발송 완료!")
+    else:
+        print(f"[{dept_name}] 현재 예약 가능한 토요일 객실이 없습니다.")
 
 if __name__ == "__main__":
-    check_reservation()
+    main()
