@@ -10,8 +10,8 @@ def send_telegram_msg(message):
     data = {'chat_id': CHAT_ID, 'text': message}
     requests.post(url, data=data)
 
-def check_month_reservation(target_ym, dept_id, dept_name):
-    """특정 연월(target_ym)과 탐방원(dept_id)의 토요일 잔여 객실을 조회하는 함수"""
+def check_month_reservation(year, month, dept_id, dept_name):
+    """특정 연도(year)와 월(month)의 토요일 잔여 객실을 조회하는 함수"""
     target_url = "https://res.knps.or.kr/eco/searchEcoMonthReservation.do"
     
     headers = {
@@ -20,10 +20,13 @@ def check_month_reservation(target_ym, dept_id, dept_name):
         'Referer': 'https://res.knps.or.kr/eco/searchEcoMonthReservation.do'
     }
     
+    # 서버 요구 규격에 맞춰 파라미터 전달
     payload = {
-        'searchYearMonth': target_ym,  # YYYYMM 형식 (예: 202609, 202610)
-        'deptId': dept_id,            # B183001: 변산반도
-        'ctgType': '01'               # 01: 생활관
+        'searchYear': str(year),
+        'searchMonth': str(month).zfill(2), # '09', '10' 형태로 변환
+        'searchYearMonth': f"{year}{str(month).zfill(2)}",
+        'deptId': dept_id,                  # B183001: 변산반도
+        'ctgType': '01'                     # 01: 생활관
     }
     
     saturday_results = []
@@ -32,7 +35,7 @@ def check_month_reservation(target_ym, dept_id, dept_name):
         response = requests.post(target_url, headers=headers, data=payload)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 토요일 셀만 추출
+        # 토요일 셀 추출
         saturday_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c and 'sat' in c)
         
         for cell in saturday_cells:
@@ -44,14 +47,14 @@ def check_month_reservation(target_ym, dept_id, dept_name):
                     count = int(em_tag.text.strip())
                     print(f"[{dept_name}] {use_date} (토): {count}개")
                     
-                    # 실 운영시에는 count >= 1 로 동작합니다.
+                    # 테스트 시에는 count >= 0 으로 확인하시고, 실 운영 시 count >= 1 로 변경하세요.
                     if count >= 0:
                         saturday_results.append(f"- {use_date}: {count}개 잔여")
                 except ValueError:
                     continue
                     
     except Exception as e:
-        print(f"[{target_ym}] 조회 중 오류 발생: {e}")
+        print(f"[{year}-{month}] 조회 중 오류 발생: {e}")
         
     return saturday_results
 
@@ -59,13 +62,16 @@ def main():
     dept_id = "B183001"
     dept_name = "변산반도 생태탐방원(생활관)"
     
-    # 🔍 조회하고 싶은 연월 리스트 설정 (9월, 10월)
-    target_months = ['202609', '202610']
+    # 🔍 조회할 (연도, 월) 목록 설정 (9월, 10월)
+    target_months = [
+        (2026, 9),
+        (2026, 10)
+    ]
     
     all_available = []
     
-    for ym in target_months:
-        results = check_month_reservation(ym, dept_id, dept_name)
+    for year, month in target_months:
+        results = check_month_reservation(year, month, dept_id, dept_name)
         if results:
             all_available.extend(results)
             
