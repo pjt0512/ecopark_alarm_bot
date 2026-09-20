@@ -9,13 +9,18 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 STATE_FILE = "last_state.json"
 
+# 📌 [설정] 알림을 받고 싶은 특정 날짜들을 추가하세요 (YYYY-MM-DD 형식)
+TARGET_DATES = [
+    "2026-10-04",  # 예시: 일요일
+    "2026-10-09",  # 예시: 한글날(공휴일)
+]
+
 def send_telegram_msg(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {'chat_id': CHAT_ID, 'text': message}
     requests.post(url, data=data)
 
 def load_last_state():
-    """이전에 전송했던 상태 기록 불러오기"""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -25,7 +30,6 @@ def load_last_state():
     return {}
 
 def save_current_state(state):
-    """현재 상태 파일에 저장하기"""
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -55,36 +59,47 @@ def check_month_reservation(year, month, dept_id, dept_name):
         'searchYearMonth': f"{year_str}{month_str}"
     }
     
-    saturday_data = {}
+    matched_data = {}
     
     try:
         response = requests.post(target_url, headers=headers, data=payload)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        saturday_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c and 'sat' in c)
+        # 모든 날짜 셀 탐색
+        all_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c)
         
-        for cell in saturday_cells:
+        for cell in all_cells:
             use_date = cell.get('data-usedt', '')
             
+            # 조회 중인 월의 날짜만 판별
             if not use_date or not use_date.startswith(f"{year_str}-{month_str}"):
                 continue
                 
-            em_tag = cell.find('em')
-            if em_tag:
-                try:
-                    count = int(em_tag.text.strip())
-                    print(f"[{dept_name}] {use_date} (토): {count}개")
-                    
-                    # 💡 잔여 객실이 1개 이상일 때만 상태에 기록
-                    if count >= 1:
-                        saturday_data[use_date] = count
-                except ValueError:
-                    continue
-                    
+            # 조건 체크: 1) 토요일이거나 2) 내가 설정한 원하는 날짜(TARGET_DATES)에 해당하는지
+            is_saturday = 'sat' in cell.get('class', [])
+            is_target_date = use_date in TARGET_DATES
+            
+            if is_saturday or is_target_date:
+                em_tag = cell.find('em')
+                if em_tag:
+                    try:
+                        count = int(em_tag.text.strip())
+                        tag_type = "토요일" if is_saturday else "지정일"
+                        print(f"[{dept_name}] {use_date} ({tag_type}): {count}개")
+                        
+                        # 💡 잔여 객실이 1개 이상일 때 기록 (테스트 시 count >= 0 으로 변경)
+                        if count >= 0:
+                            matched_data[use_date] = {
+                                "count": count,
+                                "type": tag_type
+                            }
+                    except ValueError:
+                        continue
+                        
     except Exception as e:
         print(f"[{year_str}-{month_str}] 조회 중 오류 발생: {e}")
         
-    return saturday_data
+    return matched_data
 
 def main():
     dept_id = "B183001"
@@ -104,17 +119,19 @@ def main():
         month_data = check_month_reservation(year, month, dept_id, dept_name)
         current_state.update(month_data)
         
-    # 이전 기록 상태 불러오기
     last_state = load_last_state()
     
-    # 이전과 상태가 달라졌는지 검사 (새로 추가되거나 수량이 바뀐 경우)
+    # 상태 변경 여부 확인
     if current_state != last_state:
         if current_state:
-            # 잔여 방이 발생/변동되었을 때 알림
-            msg_details = "\n".join([f"- {date}: {cnt}개 잔여" for date, cnt in current_state.items()])
+            msg_lines = []
+            for date, info in current_state.items():
+                msg_lines.append(f"- {date} ({info['type']}): {info['count']}개 잔여")
+                
+            msg_details = "\n".join(msg_lines)
             message = (
                 f"🏞️ [{dept_name}]\n"
-                f"🎉 토요일 예약 가능 객실 변동 알림!\n\n"
+                f"🎉 예약 가능 객실 변동 알림!\n\n"
                 f"{msg_details}\n\n"
                 f"👉 지금 예약하기:\nhttps://res.knps.or.kr/eco/searchEcoMonthReservation.do"
             )
@@ -123,7 +140,6 @@ def main():
         else:
             print("이전에 있던 잔여 객실이 모두 매진되었습니다.")
             
-        # 새로운 상태 저장
         save_current_state(current_state)
     else:
         print("이전 조회 결과와 동일함 (알림 스킵)")
