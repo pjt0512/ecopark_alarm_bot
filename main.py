@@ -61,7 +61,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
                     
                     # 💡 테스트 시: count >= 0
                     # 💡 실제 가동 시: count >= 1 로 복구
-                    if count >= 0:
+                    if count >= 1:
                         saturday_results.append(f"- {use_date}: {count}개 잔여")
                 except ValueError:
                     continue
