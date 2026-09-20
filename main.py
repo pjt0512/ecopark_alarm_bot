@@ -1,6 +1,8 @@
 import os
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
@@ -15,17 +17,24 @@ def check_month_reservation(year, month, dept_id, dept_name):
     target_url = "https://res.knps.or.kr/eco/searchEcoMonthReservation.do"
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'Referer': 'https://res.knps.or.kr/eco/searchEcoMonthReservation.do'
+        'Referer': 'https://res.knps.or.kr/eco/searchEcoMonthReservation.do',
+        'X-Requested-With': 'XMLHttpRequest'
     }
     
-    # 국립공원 서버 실제 요구 파라미터 규격
+    month_str = str(month).zfill(2)
+    year_str = str(year)
+    
+    # 서버 백엔드 파라미터 인식 패턴을 모두 지원하도록 작성
     payload = {
-        'deptId': dept_id,                  # B183001: 변산반도
-        'searchYear': str(year),            # 2026
-        'searchMonth': str(month).zfill(2), # 09, 10
-        'ctgType': '01'                     # 01: 생활관
+        'deptId': dept_id,
+        'ctgType': '01',
+        'year': year_str,
+        'month': month_str,
+        'searchYear': year_str,
+        'searchMonth': month_str,
+        'searchYearMonth': f"{year_str}{month_str}"
     }
     
     saturday_results = []
@@ -34,27 +43,31 @@ def check_month_reservation(year, month, dept_id, dept_name):
         response = requests.post(target_url, headers=headers, data=payload)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # class 이름에 'calendar-cell'과 'sat'이 들어간 토요일 셀 탐색
+        # class에 'calendar-cell'과 'sat'이 들어간 토요일 셀만 탐색
         saturday_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c and 'sat' in c)
         
         for cell in saturday_cells:
-            use_date = cell.get('data-usedt', '날짜 미상')
-            em_tag = cell.find('em')
+            use_date = cell.get('data-usedt', '')
             
+            # 해당 월의 날짜인지 검증 (예: 10월 조회 시 10월 날짜만 파싱)
+            if not use_date or not use_date.startswith(f"{year_str}-{month_str}"):
+                continue
+                
+            em_tag = cell.find('em')
             if em_tag:
                 try:
                     count = int(em_tag.text.strip())
                     print(f"[{dept_name}] {use_date} (토): {count}개")
                     
-                    # 💡 실제 운영 시: count >= 1
-                    # 💡 테스트 진행 시: count >= 0
+                    # 💡 테스트 시: count >= 0
+                    # 💡 실제 가동 시: count >= 1 로 복구
                     if count >= 0:
                         saturday_results.append(f"- {use_date}: {count}개 잔여")
                 except ValueError:
                     continue
                     
     except Exception as e:
-        print(f"[{year}-{month}] 조회 중 오류 발생: {e}")
+        print(f"[{year_str}-{month_str}] 조회 중 오류 발생: {e}")
         
     return saturday_results
 
@@ -62,10 +75,13 @@ def main():
     dept_id = "B183001"
     dept_name = "변산반도 생태탐방원(생활관)"
     
-    # 🔍 조회할 (연도, 월) 리스트 설정 (9월, 10월)
+    # 📅 현재 날짜 기준으로 이번 달과 다음 달 자동 계산
+    now = datetime.now()
+    next_month_dt = now + relativedelta(months=1)
+    
     target_months = [
-        (2026, 9),
-        (2026, 10)
+        (now.year, now.month),
+        (next_month_dt.year, next_month_dt.month)
     ]
     
     all_available = []
@@ -75,7 +91,6 @@ def main():
         if results:
             all_available.extend(results)
             
-    # 잔여 객실이 발견되면 텔레그램 발송
     if all_available:
         msg_details = "\n".join(all_available)
         message = (
