@@ -88,7 +88,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
                         print(f"[{dept_name}] {use_date} ({tag_type}): {count}개")
                         
                         # 💡 잔여 객실이 1개 이상일 때 기록 (테스트 시 count >= 0 으로 변경)
-                        if count >= 0:
+                        if count >= 1:
                             matched_data[use_date] = {
                                 "count": count,
                                 "type": tag_type
