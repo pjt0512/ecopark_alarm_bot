@@ -22,7 +22,7 @@ def check_reservation():
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # TODO: 실제 페이지 HTML 구조에 맞춰 토요일 잔여 객실 수 파싱 로직 작성
-        remaining_count = 0 
+        remaining_count = 1 
         
         if remaining_count >= 1:
             msg = f"[국립공원 생태탐방원 알림]\n토요일 잔여 객실이 {remaining_count}개 있습니다!\n{target_url}"
