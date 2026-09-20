@@ -2,7 +2,7 @@ name: Check Eco Reservation
 
 on:
   schedule:
-    - cron: '*/3 * * * *' # 3분마다 실행 권장
+    - cron: '*/1 * * * *' # 3분마다 실행 권장
   workflow_dispatch:
 
 jobs:
