@@ -45,7 +45,7 @@ def check_reservation():
                     count = int(em_tag.text.strip())
                     print(f"조회된 토요일 [{use_date}]: {count}개")
                     
-                    if count >= 1:
+                    if count >= 0:
                         available_saturdays.append(f"- {use_date}: {count}개 잔여")
                 except ValueError:
                     continue
