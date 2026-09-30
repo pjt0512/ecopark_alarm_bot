@@ -100,7 +100,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
                         count = int(em_tag.text.strip())
                         tag_type = "토요일" if is_saturday else "지정일"
                         
-                        if count >= 0:
+                        if count >= 1:
                             matched_data[use_date] = {
                                 "count": count,
                                 "type": tag_type
