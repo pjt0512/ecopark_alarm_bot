@@ -10,10 +10,24 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 STATE_FILE = "last_state.json"
 
+# 📌 [설정 1] 토요일 외에 감지하고 싶은 특정 날짜 (YYYY-MM-DD)
 TARGET_DATES = [
     "2026-10-04",
     "2026-10-09",
 ]
+
+# 📌 [설정 2] 모니터링할 전국 생태탐방원 목록 (필요없는 곳은 주석처리 가능)
+ECO_PARKS = {
+    "B183001": "변산반도 생태탐방원",
+    "B013001": "북한산 생태탐방원",
+    "B033001": "설악산 생태탐방원",
+    "B043001": "지리산 생태탐방원",
+    "B053001": "가야산 생태탐방원",
+    "B093001": "내장산 생태탐방원",
+    "B113001": "소백산 생태탐방원",
+    "B133001": "한려해상 생태탐방원",
+    "B193001": "무등산 생태탐방원",
+}
 
 def send_telegram_msg(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -54,7 +68,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
     
     payload = {
         'deptId': dept_id,
-        'ctgType': '01',
+        'ctgType': '01',  # 생활관 기준
         'year': year_str,
         'month': month_str,
         'searchYear': year_str,
@@ -85,7 +99,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
                         count = int(em_tag.text.strip())
                         tag_type = "토요일" if is_saturday else "지정일"
                         
-                        if count >= 1:
+                        if count >= 0:
                             matched_data[use_date] = {
                                 "count": count,
                                 "type": tag_type
@@ -94,14 +108,11 @@ def check_month_reservation(year, month, dept_id, dept_name):
                         continue
                         
     except Exception as e:
-        print(f"[{year_str}-{month_str}] 조회 시 오류: {e}")
+        print(f"[{dept_name}] [{year_str}-{month_str}] 조회 시 오류: {e}")
         
     return matched_data
 
 def run_check():
-    dept_id = "B183001"
-    dept_name = "변산반도 생태탐방원(생활관)"
-    
     now = datetime.now()
     next_month_dt = now + relativedelta(months=1)
     
@@ -112,24 +123,36 @@ def run_check():
     
     current_state = {}
     
-    for year, month in target_months:
-        month_data = check_month_reservation(year, month, dept_id, dept_name)
-        current_state.update(month_data)
+    # 등록된 모든 생태탐방원 순회 조회
+    for dept_id, dept_name in ECO_PARKS.items():
+        park_state = {}
+        for year, month in target_months:
+            month_data = check_month_reservation(year, month, dept_id, dept_name)
+            park_state.update(month_data)
+            
+        if park_state:
+            current_state[dept_name] = park_state
+        
+        # 서버 과부하 방지를 위한 미세 대기 (0.2초)
+        time.sleep(0.2)
         
     last_state = load_last_state()
     
+    # 상태 변경 감지 및 알림
     if current_state != last_state:
         if current_state:
-            msg_lines = [f"- {date} ({info['type']}): {info['count']}개 잔여" for date, info in current_state.items()]
-            msg_details = "\n".join(msg_lines)
+            msg_blocks = []
+            for park_name, dates in current_state.items():
+                date_lines = [f"  - {date} ({info['type']}): {info['count']}개 잔여" for date, info in dates.items()]
+                msg_blocks.append(f"🏞️ [{park_name}]\n" + "\n".join(date_lines))
+                
             message = (
-                f"🏞️ [{dept_name}]\n"
-                f"🎉 예약 가능 객실 변동 알림!\n\n"
-                f"{msg_details}\n\n"
-                f"👉 지금 예약하기:\nhttps://res.knps.or.kr/eco/searchEcoMonthReservation.do"
+                f"🎉 [전국 생태탐방원] 예약 가능 객실 변동 알림!\n\n"
+                + "\n\n".join(msg_blocks) +
+                f"\n\n👉 지금 예약하기:\nhttps://res.knps.or.kr/eco/searchEcoMonthReservation.do"
             )
             send_telegram_msg(message)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 알림 발송 완료!")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 전국 탐방원 알림 발송 완료!")
         else:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 이전 잔여 방 매진됨.")
             
@@ -138,9 +161,9 @@ def run_check():
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 변동 없음 (대기 중...)")
 
 if __name__ == "__main__":
-    # 💡 5시간 (300분 = 18,000초) 동안 1분 간격으로 연속 모니터링
+    # 5시간(300분) 동안 1분 간격으로 연속 모니터링
     MONITOR_MINUTES = 300
-    print(f"🚀 변산반도 생태탐방원 {MONITOR_MINUTES}분(5시간) 연속 모니터링 시작!")
+    print(f"🚀 전국 생태탐방원 {MONITOR_MINUTES}분(5시간) 연속 모니터링 시작!")
     
     start_time = time.time()
     
@@ -150,6 +173,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"실행 중 예외 발생: {e}")
             
-        time.sleep(60)  # 60초(1분) 대기
+        time.sleep(60)  # 1분 대기
         
     print("5시간 모니터링이 완료되어 종료합니다.")
