@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -9,16 +10,18 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 STATE_FILE = "last_state.json"
 
-# 📌 [설정] 알림을 받고 싶은 특정 날짜들을 추가하세요 (YYYY-MM-DD 형식)
 TARGET_DATES = [
-    "2026-10-04",  # 예시: 일요일
-    "2026-10-09",  # 예시: 한글날(공휴일)
+    "2026-10-04",
+    "2026-10-09",
 ]
 
 def send_telegram_msg(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {'chat_id': CHAT_ID, 'text': message}
-    requests.post(url, data=data)
+    try:
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        print(f"텔레그램 전송 실패: {e}")
 
 def load_last_state():
     if os.path.exists(STATE_FILE):
@@ -34,13 +37,13 @@ def save_current_state(state):
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"상태 저장 중 오류: {e}")
+        print(f"상태 저장 오류: {e}")
 
 def check_month_reservation(year, month, dept_id, dept_name):
     target_url = "https://res.knps.or.kr/eco/searchEcoMonthReservation.do"
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BeautifulSoup',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'Referer': 'https://res.knps.or.kr/eco/searchEcoMonthReservation.do',
         'X-Requested-With': 'XMLHttpRequest'
@@ -62,20 +65,16 @@ def check_month_reservation(year, month, dept_id, dept_name):
     matched_data = {}
     
     try:
-        response = requests.post(target_url, headers=headers, data=payload)
+        response = requests.post(target_url, headers=headers, data=payload, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 모든 날짜 셀 탐색
         all_cells = soup.find_all('div', class_=lambda c: c and 'calendar-cell' in c)
         
         for cell in all_cells:
             use_date = cell.get('data-usedt', '')
-            
-            # 조회 중인 월의 날짜만 판별
             if not use_date or not use_date.startswith(f"{year_str}-{month_str}"):
                 continue
                 
-            # 조건 체크: 1) 토요일이거나 2) 내가 설정한 원하는 날짜(TARGET_DATES)에 해당하는지
             is_saturday = 'sat' in cell.get('class', [])
             is_target_date = use_date in TARGET_DATES
             
@@ -85,9 +84,7 @@ def check_month_reservation(year, month, dept_id, dept_name):
                     try:
                         count = int(em_tag.text.strip())
                         tag_type = "토요일" if is_saturday else "지정일"
-                        print(f"[{dept_name}] {use_date} ({tag_type}): {count}개")
                         
-                        # 💡 잔여 객실이 1개 이상일 때 기록 (테스트 시 count >= 0 으로 변경)
                         if count >= 1:
                             matched_data[use_date] = {
                                 "count": count,
@@ -97,11 +94,11 @@ def check_month_reservation(year, month, dept_id, dept_name):
                         continue
                         
     except Exception as e:
-        print(f"[{year_str}-{month_str}] 조회 중 오류 발생: {e}")
+        print(f"[{year_str}-{month_str}] 조회 시 오류: {e}")
         
     return matched_data
 
-def main():
+def run_check():
     dept_id = "B183001"
     dept_name = "변산반도 생태탐방원(생활관)"
     
@@ -121,13 +118,9 @@ def main():
         
     last_state = load_last_state()
     
-    # 상태 변경 여부 확인
     if current_state != last_state:
         if current_state:
-            msg_lines = []
-            for date, info in current_state.items():
-                msg_lines.append(f"- {date} ({info['type']}): {info['count']}개 잔여")
-                
+            msg_lines = [f"- {date} ({info['type']}): {info['count']}개 잔여" for date, info in current_state.items()]
             msg_details = "\n".join(msg_lines)
             message = (
                 f"🏞️ [{dept_name}]\n"
@@ -136,13 +129,27 @@ def main():
                 f"👉 지금 예약하기:\nhttps://res.knps.or.kr/eco/searchEcoMonthReservation.do"
             )
             send_telegram_msg(message)
-            print("상태 변경 감지: 텔레그램 알림 발송 완료!")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 알림 발송 완료!")
         else:
-            print("이전에 있던 잔여 객실이 모두 매진되었습니다.")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 이전 잔여 방 매진됨.")
             
         save_current_state(current_state)
     else:
-        print("이전 조회 결과와 동일함 (알림 스킵)")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 변동 없음 (대기 중...)")
 
 if __name__ == "__main__":
-    main()
+    # 💡 5시간 (300분 = 18,000초) 동안 1분 간격으로 연속 모니터링
+    MONITOR_MINUTES = 300
+    print(f"🚀 변산반도 생태탐방원 {MONITOR_MINUTES}분(5시간) 연속 모니터링 시작!")
+    
+    start_time = time.time()
+    
+    while time.time() - start_time < MONITOR_MINUTES * 60:
+        try:
+            run_check()
+        except Exception as e:
+            print(f"실행 중 예외 발생: {e}")
+            
+        time.sleep(60)  # 60초(1분) 대기
+        
+    print("5시간 모니터링이 완료되어 종료합니다.")
